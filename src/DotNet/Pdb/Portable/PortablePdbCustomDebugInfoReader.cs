@@ -60,7 +60,10 @@ namespace dnlib.DotNet.Pdb.Portable {
 				return ReadStateMachineHoistedLocalScopes();
 			if (kind == CustomDebugInfoGuids.TupleElementNames)
 				return ReadTupleElementNames();
-			Debug.Fail("Unknown custom debug info guid: " + kind.ToString());
+
+			// --- There are a lot of newer CDI types, so it should not be a fail: ---
+			// Debug.Fail("Unknown custom debug info guid: " + kind.ToString());
+
 			return new PdbUnknownCustomDebugInfo(kind, reader.ReadRemainingBytes());
 		}
 
