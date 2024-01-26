@@ -222,19 +222,24 @@ namespace dnlib.DotNet.Pdb {
 				return Compiler.Other;
 
 			foreach (var asmRef in module.GetAssemblyRefs()) {
-				if (asmRef.Name == nameAssemblyVisualBasic)
+				if (asmRef.Name == nameAssemblyVisualBasic || asmRef.Name == nameAssemblyVisualBasicCore)
 					return Compiler.VisualBasic;
 			}
 
+// Disable this for now, we shouldn't be resolving types this early since we could be called by the ModuleDefMD ctor
+#if false
 			// The VB runtime can also be embedded, and if so, it seems that "Microsoft.VisualBasic.Embedded"
 			// attribute is added to the assembly's custom attributes.
 			var asm = module.Assembly;
 			if (asm != null && asm.CustomAttributes.IsDefined("Microsoft.VisualBasic.Embedded"))
 				return Compiler.VisualBasic;
+#endif
 
 			return Compiler.Other;
 		}
 		static readonly UTF8String nameAssemblyVisualBasic = new UTF8String("Microsoft.VisualBasic");
+		// .NET Core 3.0 has this assembly because Microsoft.VisualBasic contains WinForms refs
+		static readonly UTF8String nameAssemblyVisualBasicCore = new UTF8String("Microsoft.VisualBasic.Core");
 
 		void AddSequencePoints(CilBody body, SymbolMethod method) {
 			int instrIndex = 0;

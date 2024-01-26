@@ -44,35 +44,36 @@ namespace dnlib.DotNet {
 	}
 
 	/// <summary>
-	/// Provides a chance to resolve definition when <see cref="Importer"/> encountered a definition to import.
+	/// Re-maps entities that were renamed in the target module
 	/// </summary>
-	public class ImportResolver {
+	public abstract class ImportMapper {
 		/// <summary>
-		/// Resolves the specified TypeDef.
+		/// Matches source <see cref="ITypeDefOrRef"/> to the one that is already present in the target module under a different name.
 		/// </summary>
-		/// <param name="typeDef">The TypeDef.</param>
-		/// <returns>The resolved TypeDef, or <c>null</c> if cannot be resolved.</returns>
-		public virtual TypeDef Resolve(TypeDef typeDef) {
-			return null;
-		}
+		/// <param name="source"><see cref="ITypeDefOrRef"/> referenced by the entity that is being imported.</param>
+		/// <returns>matching <see cref="ITypeDefOrRef"/> or <c>null</c> if there's no match.</returns>
+		public virtual ITypeDefOrRef Map(ITypeDefOrRef source) => null;
 
 		/// <summary>
-		/// Resolves the specified MethodDef.
+		/// Matches source <see cref="FieldDef"/> to the one that is already present in the target module under a different name.
 		/// </summary>
-		/// <param name="methodDef">The MethodDef.</param>
-		/// <returns>The resolved MethodDef, or <c>null</c> if cannot be resolved.</returns>
-		public virtual MethodDef Resolve(MethodDef methodDef) {
-			return null;
-		}
+		/// <param name="source"><see cref="FieldDef"/> referenced by the entity that is being imported.</param>
+		/// <returns>matching <see cref="IField"/> or <c>null</c> if there's no match.</returns>
+		public virtual IField Map(FieldDef source) => null;
 
 		/// <summary>
-		/// Resolves the specified FieldDef.
+		/// Matches source <see cref="MethodDef"/> to the one that is already present in the target module under a different name.
 		/// </summary>
-		/// <param name="fieldDef">The FieldDef.</param>
-		/// <returns>The resolved FieldDef, or <c>null</c> if cannot be resolved.</returns>
-		public virtual FieldDef Resolve(FieldDef fieldDef) {
-			return null;
-		}
+		/// <param name="source"><see cref="MethodDef"/> referenced by the entity that is being imported.</param>
+		/// <returns>matching <see cref="IMethod"/> or <c>null</c> if there's no match.</returns>
+		public virtual IMethod Map(MethodDef source) => null;
+
+		/// <summary>
+		/// Matches source <see cref="MemberRef"/> to the one that is already present in the target module under a different name.
+		/// </summary>
+		/// <param name="source"><see cref="MemberRef"/> referenced by the entity that is being imported.</param>
+		/// <returns>matching <see cref="MemberRef"/> or <c>null</c> if there's no match.</returns>
+		public virtual MemberRef Map(MemberRef source) => null;
 	}
 
 	/// <summary>
@@ -82,9 +83,9 @@ namespace dnlib.DotNet {
 	public struct Importer {
 		readonly ModuleDef module;
 		readonly GenericParamContext gpContext;
+		readonly ImportMapper mapper;
 		RecursionCounter recursionCounter;
 		ImporterOptions options;
-		ImportResolver resolver;
 
 		bool TryToUseTypeDefs => (options & ImporterOptions.TryToUseTypeDefs) != 0;
 		bool TryToUseMethodDefs => (options & ImporterOptions.TryToUseMethodDefs) != 0;
@@ -101,20 +102,11 @@ namespace dnlib.DotNet {
 		}
 
 		/// <summary>
-		/// Gets or sets the resolver used to resolve definitions.
-		/// </summary>
-		/// <value>The resolver.</value>
-		public ImportResolver Resolver {
-			get { return resolver; }
-			set { resolver = value; }
-		}
-
-		/// <summary>
 		/// Constructor
 		/// </summary>
 		/// <param name="module">The module that will own all references</param>
 		public Importer(ModuleDef module)
-			: this(module, 0, new GenericParamContext()) {
+			: this(module, 0, new GenericParamContext(), null) {
 		}
 
 		/// <summary>
@@ -123,7 +115,7 @@ namespace dnlib.DotNet {
 		/// <param name="module">The module that will own all references</param>
 		/// <param name="gpContext">Generic parameter context</param>
 		public Importer(ModuleDef module, GenericParamContext gpContext)
-			: this(module, 0, gpContext) {
+			: this(module, 0, gpContext, null) {
 		}
 
 		/// <summary>
@@ -132,7 +124,7 @@ namespace dnlib.DotNet {
 		/// <param name="module">The module that will own all references</param>
 		/// <param name="options">Importer options</param>
 		public Importer(ModuleDef module, ImporterOptions options)
-			: this(module, options, new GenericParamContext()) {
+			: this(module, options, new GenericParamContext(), null) {
 		}
 
 		/// <summary>
@@ -141,12 +133,23 @@ namespace dnlib.DotNet {
 		/// <param name="module">The module that will own all references</param>
 		/// <param name="options">Importer options</param>
 		/// <param name="gpContext">Generic parameter context</param>
-		public Importer(ModuleDef module, ImporterOptions options, GenericParamContext gpContext) {
+		public Importer(ModuleDef module, ImporterOptions options, GenericParamContext gpContext)
+			: this(module, options, new GenericParamContext(), null) {
+		}
+
+		/// <summary>
+		/// Constructor
+		/// </summary>
+		/// <param name="module">The module that will own all references</param>
+		/// <param name="options">Importer options</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <param name="mapper">Mapper for renamed entities</param>
+		public Importer(ModuleDef module, ImporterOptions options, GenericParamContext gpContext, ImportMapper mapper) {
 			this.module = module;
 			recursionCounter = new RecursionCounter();
 			this.options = options;
 			this.gpContext = gpContext;
-			this.resolver = null;
+			this.mapper = mapper;
 		}
 
 		/// <summary>
@@ -662,12 +665,9 @@ namespace dnlib.DotNet {
 				return null;
 			if (TryToUseTypeDefs && type.Module == module)
 				return type;
-
-			if (resolver != null) {
-				ITypeDefOrRef result = resolver.Resolve(type);
-				if (result != null)
-					return result;
-			}
+			var mapped = mapper?.Map(type);
+			if (mapped != null)
+				return mapped;
 
 			return Import2(type);
 		}
@@ -714,7 +714,13 @@ namespace dnlib.DotNet {
 		/// </summary>
 		/// <param name="type">The type</param>
 		/// <returns>The imported type or <c>null</c></returns>
-		public ITypeDefOrRef Import(TypeRef type) => TryResolve(Import2(type));
+		public ITypeDefOrRef Import(TypeRef type) {
+			var mapped = mapper?.Map(type);
+			if (mapped != null)
+				return mapped;
+
+			return TryResolve(Import2(type));
+		}
 
 		TypeRef Import2(TypeRef type) {
 			if (type == null)
@@ -817,7 +823,12 @@ namespace dnlib.DotNet {
 			return result;
 		}
 
-		ITypeDefOrRef Import(ITypeDefOrRef type) => (ITypeDefOrRef)Import((IType)type);
+		/// <summary>
+		/// Imports a <see cref="ITypeDefOrRef"/>
+		/// </summary>
+		/// <param name="type">The type</param>
+		/// <returns>The imported type or <c>null</c></returns>
+		public ITypeDefOrRef Import(ITypeDefOrRef type) => (ITypeDefOrRef)Import((IType)type);
 
 		TypeSig CreateClassOrValueType(ITypeDefOrRef type, bool isValueType) {
 			var corLibType = module.CorLibTypes.GetCorLibTypeSig(type);
@@ -1028,12 +1039,12 @@ namespace dnlib.DotNet {
 				return field;
 			if (!recursionCounter.Increment())
 				return null;
-
-			if (resolver != null) {
-				IField resultField = resolver.Resolve(field);
-				if (resultField != null)
-					return resultField;
+			var mapped = mapper?.Map(field);
+			if (mapped != null) {
+				recursionCounter.Decrement();
+				return mapped;
 			}
+
 
 			MemberRef result = module.UpdateRowId(new MemberRefUser(module, field.Name));
 			result.Signature = Import(field.Signature);
@@ -1063,11 +1074,10 @@ namespace dnlib.DotNet {
 				return method;
 			if (!recursionCounter.Increment())
 				return null;
-
-			if (resolver != null) {
-				IMethod resultMethod = resolver.Resolve(method);
-				if (resultMethod != null)
-					return resultMethod;
+			var mapped = mapper?.Map(method);
+			if (mapped != null) {
+				recursionCounter.Decrement();
+				return mapped;
 			}
 
 			MemberRef result = module.UpdateRowId(new MemberRefUser(module, method.Name));
@@ -1106,6 +1116,11 @@ namespace dnlib.DotNet {
 				return null;
 			if (!recursionCounter.Increment())
 				return null;
+			var mapped = mapper?.Map(memberRef);
+			if (mapped != null) {
+				recursionCounter.Decrement();
+				return mapped;
+			}
 
 			MemberRef result = module.UpdateRowId(new MemberRefUser(module, memberRef.Name));
 			result.Signature = Import(memberRef.Signature);
